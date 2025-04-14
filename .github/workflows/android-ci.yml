@@ -1,124 +1,62 @@
-name: Android CI/CD Pipeline
-
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:
-
-env:
-  PACKAGE_NAME: com.yourdomain.aimhigh
-  VERSION: 1.0.${{ github.run_number }}
+Name: Full-Feature APK Build
+on: [push]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: 
-      image: ubuntu:22.04
-      options: --memory 6G
-
+    timeout-minutes: 60
+    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    uses: actions/checkout@v4
 
-    - name: Set up build environment
-      run: |
-        apt-get update -qq
-        apt-get install -y \
-          git zip unzip \
-          python3-pip openjdk-17-jdk \
-          zlib1g-dev libncurses5-dev \
-          libssl-dev libsqlite3-dev \
-          libffi-dev libbz2-dev
+    name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
 
-    - name: Configure Buildozer
-      run: |
-        pip install --upgrade pip wheel
-        pip install buildozer cython==0.29.36
-        buildozer init
-        sed -i "s/^version = .*/version = ${{ env.VERSION }}/" buildozer.spec
-        sed -i "s/^package.domain = .*/package.domain = yourdomain/" buildozer.spec
+    name: Install system dependencies
+      Run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          git zip unzip openjdk-17-jdk \
+          autoconf libtool pkg-config zlib1g-dev \
+          libncurses5-dev libtinfo5 cmake libffi-dev \
+          libssl-dev libbluetooth-dev libnfc-dev
 
-    - name: Build APK (Debug)
-      run: |
+    name: Install Buildozer with full features
+      Run: |
+        Pip install - upgrade pip wheel
+        Pip install buildozer cython
+        Pip install kivy[full]
+
+    name: Build APK
+      Run: |
+        buildozer -v android clean
         buildozer -v android debug
-        mkdir -p artifacts
-        cp bin/*.apk artifacts/
+        
+        # Verify APK exists
+        ls -lh bin/
+        
+        # Package additional files (if needed)
+        mkdir -p libs/arm64-v8a
+        [ -d "/home/runner/.buildozer/android/platform/build-armeabi-v7a/dists/aichat__arm64-v8a/libs/arm64-v8a/" ] && \
+          cp -r /home/runner/.buildozer/android/platform/build-armeabi-v7a/dists/aichat__arm64-v8a/libs/arm64-v8a/*.So libs/arm64-v8a/ || true
+        
+        [ -d "resources" ] & zip -r bin/full_features.zip libs/ resources/ || true
 
-    - name: Sign APK (Release)
-      if: github.ref == 'refs/heads/main'
-      run: |
-        echo "${{ secrets.KEYSTORE }}" | base64 -d > keystore.jks
-        buildozer -v android release \
-          --keystore keystore.jks \
-          --keystore-pw ${{ secrets.KEYSTORE_PASS }} \
-          --alias ${{ secrets.KEYSTORE_ALIAS }} \
-          --alias-pw ${{ secrets.ALIAS_PASS }}
-        cp bin/*-release-unsigned.apk artifacts/
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v3
-      with:
-        name: android-builds
-        path: |
-          artifacts/*.apk
-          buildozer.spec
-        retention-days: 7
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-    - name: Download artifacts
-      uses: actions/download-artifact@v3
-      with:
-        name: android-builds
-
-    - name: Deploy to GitHub Releases
+    name: Create Release
+      if: success()
       uses: softprops/action-gh-release@v1
       with:
-        files: |
-          *.apk
-          buildozer.spec
-        draft: false
-        prerelease: false
-
-    - name: Deploy to Firebase App Distribution
-      uses: wzieba/Firebase-Distribution-Github-Action@v1
-      with:
-        appId: ${{ secrets.FIREBASE_APP_ID }}
-        token: ${{ secrets.FIREBASE_TOKEN }}
-        groups: testers
-        file: *.apk
-
-    - name: Notify Slack
-      uses: slackapi/slack-github-action@v1.24.0
-      with:
-        channel-id: 'build-notifications'
-        slack-message: "New Android build v${{ env.VERSION }} available"
-      env:
-        SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-        - name: Analyze APK
-  run: |
-    apkanalyzer -h human-readable apk summary bin/*.apk > apk-stats.txt
-    echo "APK_SIZE=$(stat -c%s bin/*.apk)" >> $GITHUB_ENV
-  env:
-    ANDROID_HOME: ${{ github.workspace }}/android-sdk
-
-- name: Upload Metrics
-  uses: influxdata/influxdb-client-action@v1
-  with:
-    token: ${{ secrets.INFLUXDB_TOKEN }}
-    org: your-org
-    bucket: android-metrics
-    file: apk-stats.txt
-  - name: Check APK size
-  run: |
-    SIZE=$(stat -c%s bin/*.apk)
-    if [ $SIZE -gt 10000000000 ]; then
-      echo "::error::APK exceeds 1000MB limit!"
-      exit 1
-    fi
+        Files: |
+          bin/*.apk
+          bin/full_features.zip
+        tag_name: v1.0.0
+        generate_release_notes: true
+      name: Cache buildozer dependencies 
+     uses: actions/cache@v3
+     with:
+    path: |
+      ~/.buildozer
+      ~/.gradle
+    Key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
