@@ -47,3 +47,10 @@ jobs:
         path: |
           bin/*.apk
           bin/full_features.zip
+          - name: Commit APK
+  run: |
+    git config --global user.email "actions@github.com"
+    git config --global user.name "GitHub Actions"
+    git add bin/*.apk
+    git commit -m "Auto-commit APK build ${{ github.run_number }}"
+    git push
