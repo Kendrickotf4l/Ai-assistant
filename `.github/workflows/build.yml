@@ -1,56 +1,53 @@
-name: Full-Feature APK Build
-on: [push]
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60  # Increased timeout
-    
+    container: ubuntu:22.04
+
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-
-    - name: Install system dependencies
+    - name: Set up build environment
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          git zip unzip openjdk-17-jdk \
-          autoconf libtool pkg-config zlib1g-dev \
-          libncurses5-dev libtinfo5 cmake libffi-dev \
-          libssl-dev libbluetooth-dev libnfc-dev
+        apt-get update
+        apt-get install -y \
+            git \
+            zip \
+            unzip \
+            python3-pip \
+            openjdk-17-jdk \
+            zlib1g-dev \
+            libncurses5-dev \
+            libgdbm-dev \
+            libnss3-dev \
+            libssl-dev \
+            libsqlite3-dev \
+            libreadline-dev \
+            libffi-dev \
+            libbz2-dev
 
-    - name: Install Buildozer with full features
+    - name: Install Buildozer
       run: |
-        pip install buildozer cython
-        pip install kivy[full]
+        pip3 install --upgrade pip
+        pip3 install buildozer cython==0.29.36 virtualenv
+        buildozer init
 
-    - name: Build APK (Full Features)
+    - name: Build APK
       run: |
-        buildozer -v android clean
-        buildozer -v android debug deploy
-        
-        # Include all shared libraries
-        mkdir -p libs/arm64-v8a
-        cp -r /home/runner/.buildozer/android/platform/build-armeabi-v7a/dists/aichat__arm64-v8a/libs/arm64-v8a/*.so libs/arm64-v8a/
-        
-        # Package extra assets
-        zip -r bin/full_features.zip libs/ resources/
+        buildozer -v android debug
+        mkdir artifacts
+        cp bin/*.apk artifacts/
 
-    - name: Upload APK with Extras
+    - name: Upload APK artifact
       uses: actions/upload-artifact@v3
       with:
-        name: full-feature-apk
-        path: |
-          bin/*.apk
-          bin/full_features.zip
-          - name: Commit APK
-  run: |
-    git config --global user.email "actions@github.com"
-    git config --global user.name "GitHub Actions"
-    git add bin/*.apk
-    git commit -m "Auto-commit APK build ${{ github.run_number }}"
-    git push
+        name: aimhigh-apk
+        path: artifacts/*.apk
+        retention-days: 5
